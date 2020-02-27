@@ -24,6 +24,8 @@ import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoDatabase;
 
 import java.io.StringReader;
+import java.net.URLEncoder;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -201,23 +203,40 @@ public class ConnectionManager implements MongoConstants {
       } else {
 
         // VCAP_SERVICES don't exist, so use the DB resource
-        dbAddress = new ServerAddress(mongoHost, mongoPort);
+        if (mongoHost.contains("mongodb://") || mongoHost.contains("mongodb+srv://")) {
+          logger.info("MONGO_HOST is a mongo uri string, attempting URI connection");
+          MongoClientURI mongoUri;
 
-        // If username & password exists, connect DB with username & password
-        if ((!mongoUsername.isPresent()) || (!mongoPassword.isPresent())) {
-          mongoClient = new MongoClient(dbAddress, builtOptions);
+          if ((!mongoUsername.isPresent()) || (!mongoPassword.isPresent())) {
+            mongoUri = new MongoClientURI(mongoHost, options);
+          } else {
+            String[] result = mongoHost.split("://");
+            String urlUsername = URLEncoder.encode(mongoUsername.get(), "UTF-8");
+            String urlPassword = URLEncoder.encode(mongoPassword.get(), "UTF-8");
+            String mongoUriString = MessageFormat.format("{0}://{1}:{2}@{3}",
+                    result[0], urlUsername, urlPassword, result[1]
+            );
+            mongoUri = new MongoClientURI(mongoUriString, options);
+          }
+          mongoClient = new MongoClient(mongoUri);
         } else {
-          List<MongoCredential> credentials = new ArrayList<>();
-          credentials.add(MongoCredential
-              .createCredential(mongoUsername.get(), mongoDbName, 
-                  mongoPassword.get().toCharArray()));
-          mongoClient = new MongoClient(dbAddress, credentials, builtOptions);
+          // original single host connection
+          dbAddress = new ServerAddress(mongoHost, mongoPort);
+
+          // If username & password exists, connect DB with username & password
+          if ((!mongoUsername.isPresent()) || (!mongoPassword.isPresent())) {
+            mongoClient = new MongoClient(dbAddress, builtOptions);
+          } else {
+            List<MongoCredential> credentials = new ArrayList<>();
+            credentials.add(MongoCredential
+                    .createCredential(mongoUsername.get(), mongoDbName,
+                            mongoPassword.get().toCharArray()));
+            mongoClient = new MongoClient(dbAddress, credentials, builtOptions);
+          }
         }
       }
 
       db = mongoClient.getDatabase(mongoDbName);
-      logger.info("#### Mongo DB Server " + mongoClient.getAddress().getHost() + " ####");
-      logger.info("#### Mongo DB Port " + mongoClient.getAddress().getPort() + " ####");
       logger.info("#### Mongo DB is created with DB name " + mongoDbName + " ####");
       logger.info("#### MongoClient Options ####");
       logger.info("maxConnectionsPerHost : " + builtOptions.getConnectionsPerHost());
@@ -225,7 +244,6 @@ public class ConnectionManager implements MongoConstants {
       logger.info("maxWaitTime : " + builtOptions.getMaxWaitTime());
       logger.info("connectTimeout : " + builtOptions.getConnectTimeout());
       logger.info("socketTimeout : " + builtOptions.getSocketTimeout());
-      logger.info("socketKeepAlive : " + builtOptions.isSocketKeepAlive());
       logger.info("sslEnabled : " + builtOptions.isSslEnabled());
       logger.info("threadsAllowedToBlockForConnectionMultiplier : "
           + builtOptions.getThreadsAllowedToBlockForConnectionMultiplier());
